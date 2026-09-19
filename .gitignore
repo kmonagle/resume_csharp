@@ -1,0 +1,9 @@
+# Build output and local files
+bin/
+obj/
+.vs/
+*.user
+.env
+.env.*
+!.env.example
+TestResults/

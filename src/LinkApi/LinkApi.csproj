@@ -1,0 +1,31 @@
+<!--
+  Why this file exists: the project definition: target framework, compiler settings
+  and NuGet dependencies.
+
+  JS/TS vs C#: a .csproj is package.json + tsconfig.json in one XML file. There is
+  no node_modules: NuGet packages are restored to a shared cache and compiled
+  against, and `dotnet build` produces DLLs (there is no bundler step).
+-->
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Nullable reference types: `string` can never be null and `string?` can, and
+         the COMPILER enforces it. It is the closest thing to TypeScript's
+         strictNullChecks, and turning it on is the first thing to do in any new
+         project. -->
+    <Nullable>enable</Nullable>
+    <!-- Common `using` directives (System, System.Linq, ...) are added for you. -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Culture-independent behaviour and no ICU dependency in the container. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Nullability warnings become build errors. -->
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+  </ItemGroup>
+
+</Project>

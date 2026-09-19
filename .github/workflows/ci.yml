@@ -1,0 +1,80 @@
+# Why this file exists: proves this service satisfies the shared contract on every push.
+# It checks formatting and runs the C# tests, then runs the SAME contract suite that the
+# Next.js, Go and Python implementations pass, against this service, using a throwaway
+# Postgres whose schema comes from the pinned contract version.
+name: CI
+on: [push, pull_request]
+
+env:
+  # The one line to change to adopt a newer contract version.
+  CONTRACT_REPO: kmonagle/resume_nextjs
+  CONTRACT_REF: contract-v1
+  TEST_TOKEN: ci-token-0123456789abcdef
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_PASSWORD: dev, POSTGRES_DB: links }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore
+      - run: dotnet format --verify-no-changes
+      - run: dotnet test --no-restore
+
+      # The contract lives in the Next.js repo, pinned to a tag.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONTRACT_REPO }}
+          ref: ${{ env.CONTRACT_REF }}
+          path: contract
+
+      # This service never migrates; create the tables from the pinned SQL.
+      - name: Apply the contract's migrations
+        run: |
+          for f in contract/drizzle/*.sql; do
+            psql "postgres://postgres:dev@localhost:5432/links" -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Start this service
+        run: |
+          dotnet publish src/LinkApi/LinkApi.csproj -c Release -o out --no-restore
+          DATABASE_URL="postgres://postgres:dev@localhost:5432/links" \
+            LINK_BACKEND_TOKEN="$TEST_TOKEN" dotnet out/LinkApi.dll &
+          # Wait (up to 30s) until it answers.
+          for i in $(seq 30); do
+            curl -sf http://localhost:8080/meta && exit 0
+            sleep 1
+          done
+          echo "service did not start" && exit 1
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Contract tests against this service
+        working-directory: contract
+        env:
+          CONTRACT_BASE_URL: http://localhost:8080
+          CONTRACT_IDENTITY: header # remote backends: X-Owner-Id + bearer token
+          CONTRACT_API_PREFIX: ""    # routes are /links, not /api/links
+          CONTRACT_TOKEN: ${{ env.TEST_TOKEN }}
+        run: |
+          npm ci
+          npm run test:contract
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t resume-csharp .

@@ -1,0 +1,19 @@
+# Why this file exists: shared formatting rules. `dotnet format` (run in CI) reads
+# them, so formatting is checked mechanically, not argued about in review.
+#
+# JS/TS vs C#: this is the .NET counterpart of a Prettier + ESLint config: one file,
+# understood by the compiler, `dotnet format`, and every IDE.
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{csproj,slnx,yml,yaml,json}]
+indent_size = 2
+
+[*.cs]
+csharp_style_namespace_declarations = file_scoped:warning
