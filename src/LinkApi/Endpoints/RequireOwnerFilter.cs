@@ -77,5 +77,9 @@ public sealed partial class RequireOwnerFilter(TokenVerifier tokens) : IEndpoint
 
     // JS/TS vs C#: the `[..]` above is a RANGE: `header[BearerPrefix.Length..]` is
     // "everything from that index on", like `header.slice(n)`.
+    // JS/TS vs C#: `(string)x` is a CAST, checked at RUNTIME (a wrong type throws
+    // InvalidCastException). TypeScript's `x as string` is only a compile-time claim and
+    // vanishes when the code is compiled. The `!` silences the null warning, promising that the
+    // filter always sets this before a handler can run.
     public static string GetOwner(HttpContext http) => (string)http.Items[OwnerItemKey]!;
 }

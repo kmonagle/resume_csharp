@@ -17,6 +17,11 @@ public class LinkServiceTests
     // JS/TS vs C#: `Assert.IsType<T>` both checks the runtime type and returns the value
     // as that type, so the next line can read its properties. It's how tests unpack
     // the result records (the C# stand-in for a discriminated union).
+    // JS/TS vs C#: two small features on the next lines. `new() { PerOwner = ... }` is a
+    // TARGET-TYPED `new` with an OBJECT INITIALIZER: the compiler knows the type from the
+    // parameter, and the braces set properties (no constructor arguments needed). And `default`
+    // is the type's zero value: for a CancellationToken it means "never cancelled", which is
+    // what a test wants.
     [Fact]
     public async Task Create_enforces_limits()
     {

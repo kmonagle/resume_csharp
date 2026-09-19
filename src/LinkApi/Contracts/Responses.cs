@@ -25,6 +25,10 @@ public sealed record LinkDto(
     bool IsActive,
     string Status)
 {
+    // JS/TS vs C#: `=>` after a method signature is an EXPRESSION-BODIED MEMBER: a method whose
+    // whole body is one expression, returned implicitly (an arrow function's short form, but on
+    // a method). `new(...)` with no type name is TARGET-TYPED: the compiler knows the type is
+    // LinkDto from the return type.
     public static LinkDto From(Link link, DateTimeOffset now) => new(
         link.Id,
         link.ShortCode,

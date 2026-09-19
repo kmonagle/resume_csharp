@@ -9,6 +9,9 @@ the contract, not the language, defines the system.
 
 **Implements contract `contract-v1`** (the tag pinned in `.github/workflows/ci.yml`).
 
+A ten-point crib sheet of the biggest C#-versus-JS/TS differences is in the comment at the top of
+`src/LinkApi/Program.cs`.
+
 Read this README for how the services fit together and why the design is the way it is. Read
 the code for the C#: every file opens with a comment on why it exists, and comments tagged
 **`JS/TS vs C#:`** call out where C# behaves differently from what a JavaScript/TypeScript
@@ -105,22 +108,115 @@ Two things specific to this implementation:
   with a plain `SELECT`. That is safe: the decision was already made atomically, and a link's
   target never changes.
 
-## What Next.js does when this service misbehaves
+### One request, end to end
 
-Next.js validates every response with zod and maps outcomes: `201` → created; `409` → "code
-taken" (a form field error); `429` → "limit reached" (this service's message is shown); `404` on
-toggle → not found; `404`/`410` on a redirect → passed through; `401` → a misconfigured token
-(logged, shown as "backend unavailable"); `5xx`, invalid JSON or a timeout → "backend
-unavailable". That becomes a `503` from the JSON API, a "waking up, try again" message on the
-form, a `503` + `Retry-After` on a short link, and "live updates paused" on the dashboard.
+What happens to a `POST /links` from the moment it arrives (the shape is the same for every
+route; the redirect adds a callback at the end):
+
+```
+Next.js ── POST /links ──► Kestrel (the built-in web server) accepts and parses the request
+                            │
+                            ▼  the middleware pipeline (Program.cs), in order:
+                            │    exception handler  → turns any unhandled exception into a JSON 500
+                            │    routing            → matches POST /links
+                            ▼
+                            │  the route group's ENDPOINT FILTER (RequireOwnerFilter) runs first:
+                            │    bearer token wrong  → 401     X-Owner-Id unusable → 400
+                            │    (before the body is read: a caller who isn't allowed learns nothing)
+                            ▼
+                            │  the handler runs. DI builds what it needs for THIS request:
+                            │    LinkService ← EfLinkStore ← LinksDbContext   (all scoped, one each)
+                            │  it reads the JSON body and validates it (a bad body ends here as a 400)
+                            ▼
+                            │  LinkService.CreateAsync: cleanup DELETE, two COUNTs, INSERT
+                            ▼
+                            │  the handler returns Results.Json(...); ASP.NET Core writes it (201)
+                            ▼
+Next.js ◄── 201 + JSON ─────┘   (for a redirect, the OnCompleted callback runs now, in its own scope)
+```
+
+One difference from the Python service worth knowing: **there is no request-wide transaction here.**
+Each EF Core operation (`SaveChanges`, `ExecuteUpdate`, `ExecuteDelete`) commits on its own, so the
+cleanup, counts and insert in `CreateAsync` are separate statements. That is fine for the soft demo
+limits (which were always overshootable by a burst) and it means nothing is committed *after* the
+response is sent; the atomic guarantee that matters, the click claim, is a single statement anyway.
+
+### How Next.js calls this service
+
+The Next.js side of the conversation is `src/server/link-api/remote.ts`. What it does, and so what
+this service has to uphold:
+
+- **Every call to `/links`** carries `Authorization: Bearer <token>` and `X-Owner-Id`, uses
+  `cache: "no-store"` (live data must never be cached by Next's fetch layer), and has a 90-second
+  timeout (a free-tier cold start is a slow request, not an error).
+- **Redirects** use `redirect: "manual"`, because the caller wants this service's `Location` header
+  itself and not the destination site's HTML. It forwards the visitor's `Referer` and `User-Agent`
+  so the click log holds the real browser. `GET /r/{code}` needs no token.
+- **Responses are validated with zod against the contract**, not trusted. So the shape has to be
+  exact: camelCase keys (System.Text.Json's web defaults do this), timestamps as ISO strings with
+  milliseconds and a `Z` (`LinkDto.Iso`), nullable fields sent as `null` (never omitted), and
+  `status` one of `active | expired | max_clicks | disabled` (`LinkStatusExtensions.ToWire`). A
+  response that breaks the contract is treated by Next.js as "backend unavailable".
+- **Errors are mapped by status code** (table below), so the *right* status matters more than the
+  message text, with one exception: a `410` body is shown to the visitor as-is, and `429`'s message
+  is shown on the form.
+- **The footer's "Served by" line** comes from `GET /meta` (via Next.js's own `/api/meta`), which is
+  why `/meta` is open and never touches the database.
+
+### What Next.js does when this service misbehaves
+
+| This service answers | Next.js treats it as |
+|---|---|
+| `201` on create | success |
+| `409` on create | "that code is taken" (a field error on the form) |
+| `429` on create | "limit reached" (this service's message is shown) |
+| `404` on toggle | link not found (someone else's, or it doesn't exist) |
+| `404` / `410` on a redirect | Next's 404 page / a `410` with this service's message |
+| `401` | a misconfigured token: logged on the Next.js side, surfaced as "backend unavailable" |
+| `5xx`, invalid JSON, or a timeout | "backend unavailable" |
+
+"Backend unavailable" becomes: a `503` from the JSON API; a "waking up, try again" message on the form
+(which keeps what you typed); a `503` with `Retry-After: 30` on a short link; and "live updates
+paused" on the dashboard, which keeps polling and recovers by itself.
 
 ## Free-tier cold starts (Render)
 
-A free service sleeps after 15 idle minutes and takes about a minute to wake. With Next.js in
-front, both can be asleep, so Next.js pings this service's `/meta` when it starts
-(fire-and-forget) so the two wake in parallel, and uses a 90-second timeout. A free workspace
-gets about 750 instance-hours a month: one always-on service uses ~730, so don't try to keep two
-awake. `LINK_BACKEND=local` needs no second service at all.
+On Render's free plan a service sleeps after 15 minutes without traffic and takes about a minute to
+wake. With Next.js in front of this service **both can be asleep**, and naïvely they would wake one
+after the other (Next.js wakes, then calls this service, which wakes: about two minutes). What the
+Next.js side does about it:
+
+- **Warm-up in parallel.** `src/instrumentation.ts` in the Next.js repo pings this service's `/meta`
+  as soon as Next.js starts (fire-and-forget, never awaited, because Next waits for that hook before
+  accepting requests), so this service begins waking while Next.js is still booting.
+- **A 90 second timeout** on every call, so a cold start is a slow request instead of an error.
+- **The footer never blocks a page.** With a remote backend the "Served by" line is fetched by the
+  browser after load.
+- **Don't try to keep both awake.** A free workspace gets about 750 instance-hours a month. One
+  always-on service uses about 730; two would run out mid-month.
+- `LINK_BACKEND=local` needs no second service at all.
+
+On this side, `/meta` is the health check and doesn't touch the database, so the service reports
+healthy the moment Kestrel is listening. The **first real request is slower** than the rest (about a
+quarter of a second here, against 15-75 ms afterwards): .NET compiles code to machine code the first
+time it runs (JIT) and EF Core builds its model on first use. Neon's own compute may also be waking,
+which adds a second or two.
+
+## Startup, shutdown and scaling
+
+- **Start:** the image runs `dotnet LinkApi.dll`. `Program.cs` builds the app, and the options pattern
+  validates the settings at startup (`ValidateOnStart`), so a bad setting stops the process with a
+  clear message. The database context is only created on first use, so nothing connects to Postgres
+  until the first query.
+- **Port:** Render injects `PORT`; `Program.cs` copies it into Kestrel's `HTTP_PORTS` setting
+  (default `8080`).
+- **Stop:** Render sends `SIGTERM` on a redeploy. The host stops accepting connections, lets in-flight
+  requests finish (up to its 30-second shutdown timeout), and disposes the services.
+- **Concurrency:** unlike Node's single event loop or Python's, ASP.NET Core serves requests on many
+  threads from a thread pool, with `async`/`await` freeing a thread while a query is in flight, so one
+  process can use all its CPU cores. The database pool is 5 connections (`Max Pool Size=5`); a sixth
+  concurrent query waits for a free one (Npgsql's 15-second default) instead of failing, which is what
+  happens to some of the 12 simultaneous requests in the parallel-click contract test.
 
 ## The shared database
 
@@ -149,6 +245,22 @@ pins the version this service implements (`CONTRACT_REF: contract-v1`, a git tag
 out, applies its `drizzle/*.sql` to a throwaway Postgres, starts this service, and runs the shared
 suite against it. To upgrade, bump the tag, make the new tests pass, and merge; other backends can
 stay on the old tag meanwhile, so prefer *additive* contract changes.
+
+**Where a framework default disagreed with the contract** (each one is a place the tests or the
+logs would have caught it, and each is fixed and commented in the code):
+
+| Default behaviour | What the contract needs | How it is handled |
+|---|---|---|
+| A body that fails to bind is answered with the framework's own 400 | `400` with `{"error", "fieldErrors"}` | the body is read by hand in `ReadBodyAsync` (`Endpoints/LinkEndpoints.cs`) |
+| An unhandled exception in Production gives an empty `500` | a JSON `{"error": "Internal error"}` | `UseExceptionHandler` in `Program.cs` |
+| `Results.Redirect(url)` answers `302` | `307` | `permanent: false, preserveMethod: true` |
+| System.Text.Json leaves dictionary keys as written | camelCase `fieldErrors` keys | the keys are added in camelCase in `CreateLinkValidator` |
+| Npgsql has no URL parser (Neon hands out a URL) | connect with Neon's `postgres://…` URL | `Configuration/DatabaseUrl.cs` |
+| Npgsql tries to load a Kerberos library on connect | no alarming `Error:` line in the log | `GssEncryptionMode = Disable` |
+| EF Core treats a property's CLR default as "unset" and uses the column default | an explicit `false` must be stored as `false` | no database default configured for `IsActive` |
+| EF Core logs every caught unique-violation as an Error with a stack trace | a taken code is normal, not an incident | the EF `Update`/`Database.Command` log categories are off |
+| The image's default port setting conflicts with `UseUrls` | listen on Render's `PORT` cleanly | set `HTTP_PORTS` from `PORT` instead |
+| `Microsoft.AspNetCore` at `Warning` (the usual template) hides request logs | one log line per request | the `Hosting.Diagnostics` category is switched back on |
 
 ### Four implementations, side by side
 

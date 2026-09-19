@@ -7,6 +7,43 @@
 // the file's statements simply run in order, like a Node script. `WebApplication` is
 // Express's `app`, but with a built-in dependency-injection container and a
 // configuration system (environment variables, JSON files) attached.
+//
+// Ten things that are different from JS/TS, all of which show up in this codebase:
+//
+//  1. COMPILED AND STATICALLY TYPED. `dotnet build` turns the code into DLLs, and type errors
+//     stop the build (nothing is "any" unless you ask). `var x = ...` still has a fixed type; the
+//     compiler just infers it. There is no separate type-checking step to forget, as with tsc.
+//  2. NAMESPACES AND CONVENTIONS. `namespace X;` at the top of a file, `using` to import. Types,
+//     methods and properties are PascalCase; locals and parameters are camelCase; interfaces start
+//     with `I`. Access is explicit: `public`, `private`, `internal` (the default for types:
+//     visible only inside the same project), `sealed` (no subclasses), `static`.
+//  3. NULL IS TRACKED BY THE COMPILER. There is only `null` (no undefined). With nullable
+//     reference types on, `string` can never be null and `string?` can, and the compiler warns
+//     (here: errors) when you might dereference a null. `?.` and `??` work as in JS; `!` says
+//     "trust me, it's not null" and is checked by nothing at runtime.
+//  4. VALUE TYPES VS REFERENCE TYPES. `int`, `bool`, `DateTimeOffset` and structs are COPIED on
+//     assignment; classes and records are shared references. `int?` is a real wrapper type
+//     (Nullable<int>), not a union with null. Records compare by value; classes by identity.
+//  5. REAL CLASSES, PROPERTIES, INTERFACES. State is exposed as properties (`{ get; set; }`), not
+//     public fields. Interfaces are NOMINAL: a class must say `: IThing` to implement one (unlike
+//     TypeScript's and Go's structural typing). `enum`, `record` and `interface` are all
+//     first-class runtime types, not erased at build time like TS types.
+//  6. EXCEPTIONS ARE TYPED AND NORMAL. `try`/`catch (SpecificException)`/`finally`, with `when`
+//     filters. Unlike Go, failure is thrown, not returned, but this code still returns EXPECTED
+//     outcomes (code taken, limit reached) as values, and reserves exceptions for real failures.
+//  7. DISPOSAL IS DETERMINISTIC. Things holding a database connection or scope implement
+//     IDisposable/IAsyncDisposable, and `using` / `await using` releases them at the end of the
+//     block. The garbage collector frees memory, but it is not relied on to close connections.
+//  8. ASYNC LOOKS LIKE JS BUT IS DIFFERENT UNDER THE HOOD. `Task<T>` is Promise<T> and `await`
+//     is the same, but continuations run on a THREAD POOL (ASP.NET Core serves requests on many
+//     threads, unlike Node's single event loop), a CancellationToken is passed explicitly, and
+//     you never block on a Task (`.Result`, `.Wait()`): that ties up a thread and can deadlock.
+//  9. LINQ. `Where`/`Select`/`OrderBy` read like array methods, but they are LAZY (nothing runs
+//     until you enumerate with `ToList()`, `First()`, `foreach`), and on a database query the
+//     lambdas are expression trees that EF Core translates to SQL rather than running them.
+// 10. THE FRAMEWORK COMES WITH THE LANGUAGE. Dependency injection, configuration, logging and
+//     the middleware pipeline are built in (Node needs libraries for each), and `dotnet` is the
+//     single CLI for build, test, format and packages (NuGet, the npm of .NET).
 using LinkApi.Configuration;
 using LinkApi.Data;
 using LinkApi.Endpoints;
@@ -20,6 +57,8 @@ var builder = WebApplication.CreateBuilder(args);
 // ASPNETCORE_HTTP_PORTS (Kestrel's own port setting), so we overwrite THAT with PORT rather
 // than calling UseUrls: mixing the two makes ASP.NET print an "Overriding HTTP_PORTS" warning
 // on every start.
+// JS/TS vs C#: `??` is the same null-coalescing operator as in JS: the right side is used only
+// when the left is null (an unset environment variable reads as null, not "").
 builder.Configuration["HTTP_PORTS"] = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 // Cap request bodies at 1 MiB so a huge upload can't exhaust memory.
 builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = 1 << 20);

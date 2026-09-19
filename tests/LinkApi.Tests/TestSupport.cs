@@ -40,12 +40,16 @@ public sealed class FakeLinkStore : ILinkStore
 
     public int Total { get; init; }
 
+    // JS/TS vs C#: `init` makes a property settable only while the object is being CREATED
+    // (`new FakeLinkStore { TakenCodes = [...] }`), then read-only: immutability by default.
     public HashSet<string> TakenCodes { get; init; } = [];
 
     public Link? Found { get; init; }
 
     public ClaimedLink? Claim { get; init; }
 
+    // JS/TS vs C#: `Task.FromResult(x)` wraps a value in an already-completed Task, like
+    // `Promise.resolve(x)`: the fake has nothing to await, but the interface demands a Task.
     public Task<Link?> InsertAsync(string ownerId, string code, CreateLinkInput data, CancellationToken ct) =>
         Task.FromResult(TakenCodes.Contains(code) ? null : Make.Link(code));
 

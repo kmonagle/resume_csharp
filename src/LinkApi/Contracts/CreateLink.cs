@@ -40,6 +40,8 @@ public sealed class ValidationErrors : Dictionary<string, List<string>>
     {
         if (!TryGetValue(field, out var messages))
         {
+            // JS/TS vs C#: `[]` is a COLLECTION EXPRESSION (C# 12): an empty list, inferred
+            // from the variable's type (List<string> here), like an array literal in JS.
             messages = [];
             this[field] = messages;
         }

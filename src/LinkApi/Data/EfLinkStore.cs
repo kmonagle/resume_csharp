@@ -73,9 +73,14 @@ public sealed class EfLinkStore(LinksDbContext db) : ILinkStore
             .Where(l => l.OwnerId == ownerId)
             .OrderByDescending(l => l.CreatedAt)
             .ToListAsync(ct);
+        // JS/TS vs C#: `Select(ToLink)` passes a METHOD GROUP (the method itself, as a function
+        // value), like `.map(toLink)`. Select is lazy, so `ToList()` forces it to run now.
         return entities.Select(ToLink).ToList();
     }
 
+    // JS/TS vs C#: these methods aren't marked `async` and don't `await`: they just RETURN the
+    // Task that EF Core gives them, which is cheaper and equivalent when a method only forwards
+    // a promise (in JS, `return db.count()` from a non-async function).
     public Task<int> CountByOwnerAsync(string ownerId, CancellationToken ct) =>
         db.Links.CountAsync(l => l.OwnerId == ownerId, ct);
 

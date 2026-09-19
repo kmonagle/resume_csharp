@@ -85,6 +85,9 @@ public sealed class LinkService(ILinkStore store, TimeProvider clock)
     public const int RetentionDays = 30;
     private const int MaxCodeAttempts = 5;
 
+    // JS/TS vs C#: `static readonly` is a class-level constant built once (a module-level
+    // `const` in JS); `const` is reserved for compile-time literals (numbers, strings). The
+    // `new() { [key] = value }` form is a collection INITIALIZER: build and fill in one go.
     private static readonly Dictionary<string, string> GoneMessages = new()
     {
         ["expired"] = "This link has expired.",

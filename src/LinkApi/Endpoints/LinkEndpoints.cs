@@ -61,6 +61,8 @@ public static class LinkEndpoints
             CreateResult.Created created => Results.Json(LinkDto.From(created.Link, now), statusCode: 201),
             CreateResult.CodeTaken => ApiResults.Error(409, "That code is already taken"),
             CreateResult.LimitReached limited => ApiResults.Error(429, limited.Message),
+            // JS/TS vs C#: `throw` is allowed as an EXPRESSION here, as one arm of the switch.
+            // `$"..."` is string interpolation, the same as a JS template literal.
             _ => throw new InvalidOperationException($"Unhandled result {result}"),
         };
     }
@@ -122,6 +124,9 @@ public static class LinkEndpoints
                 // click log is acceptable to lose here, so it is logged and dropped.
                 http.Response.OnCompleted(async () =>
                 {
+                    // JS/TS vs C#: `await using` disposes the scope (and the database context
+                    // inside it) when this block ends, even on an exception: like `finally`
+                    // with the cleanup written next to the setup. There is no JS keyword for it.
                     await using var scope = scopes.CreateAsyncScope();
                     try
                     {
@@ -130,6 +135,10 @@ public static class LinkEndpoints
                     }
                     catch (Exception ex)
                     {
+                        // JS/TS vs C#: STRUCTURED LOGGING. The first argument is the exception
+                        // (logged with its stack trace) and the second is a message TEMPLATE; the
+                        // log system keeps the parts separate, which console.log can't do. Loggers
+                        // are created per category ("LinkApi.Clicks") so output can be filtered.
                         scope.ServiceProvider.GetRequiredService<ILoggerFactory>()
                             .CreateLogger("LinkApi.Clicks")
                             .LogError(ex, "Recording click event failed");
@@ -166,6 +175,8 @@ public static class LinkEndpoints
         {
             return await http.Request.ReadFromJsonAsync<T>(http.RequestAborted);
         }
+        // JS/TS vs C#: `is A or B` is a PATTERN with `or`: "ex is any of these types". Catching
+        // ONLY these (not every Exception) means a real bug still surfaces as a 500.
         catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException
                                        or BadHttpRequestException)
         {
