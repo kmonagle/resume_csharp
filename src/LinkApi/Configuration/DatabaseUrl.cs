@@ -47,6 +47,11 @@ public static class DatabaseUrl
             // (The .NET twin of the Next.js app's `prepare: false`: Npgsql doesn't
             // prepare statements automatically, so nothing else is needed.)
             NoResetOnClose = true,
+            // Npgsql otherwise tries to load a Kerberos library (libgssapi_krb5) on the first
+            // connection. The runtime image doesn't ship it, and although the failure is
+            // harmless it prints an alarming "Error: cannot open shared object file" line.
+            // We authenticate with a password and never use GSS.
+            GssEncryptionMode = GssEncryptionMode.Disable,
         };
 
         // libpq's `sslmode` becomes Npgsql's SslMode. `channel_binding` (which Neon's

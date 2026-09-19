@@ -68,7 +68,12 @@ public sealed class LinksDbContext(DbContextOptions<LinksDbContext> options) : D
             link.Property(l => l.CreatedAt).HasDefaultValueSql("now()");
             link.Property(l => l.UpdatedAt).HasDefaultValueSql("now()");
             link.Property(l => l.ClickCount).HasDefaultValueSql("0");
-            link.Property(l => l.IsActive).HasDefaultValueSql("true");
+
+            // IsActive deliberately has NO database default here, though the column has one.
+            // EF treats a property's CLR default (false for a bool) as "not set, use the
+            // database default", so with a default of true an explicit `false` would be
+            // silently written as `true`. This service always states the value, so it never
+            // needs the default (and EF warns about it at startup if we say otherwise).
         });
 
         modelBuilder.Entity<ClickEventEntity>(click =>

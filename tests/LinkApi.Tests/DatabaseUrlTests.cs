@@ -35,6 +35,7 @@ public class DatabaseUrlTests
         var builder = new NpgsqlConnectionStringBuilder(DatabaseUrl.ToConnectionString(Neon));
         Assert.Equal(5, builder.MaxPoolSize);
         Assert.True(builder.NoResetOnClose);
+        Assert.Equal(GssEncryptionMode.Disable, builder.GssEncryptionMode);
     }
 
     [Fact]

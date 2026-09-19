@@ -16,8 +16,11 @@ using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Render injects PORT; locally it defaults to 8080.
-builder.WebHost.UseUrls($"http://+:{Environment.GetEnvironmentVariable("PORT") ?? "8080"}");
+// Render injects PORT; locally it defaults to 8080. The official .NET images already set
+// ASPNETCORE_HTTP_PORTS (Kestrel's own port setting), so we overwrite THAT with PORT rather
+// than calling UseUrls: mixing the two makes ASP.NET print an "Overriding HTTP_PORTS" warning
+// on every start.
+builder.Configuration["HTTP_PORTS"] = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 // Cap request bodies at 1 MiB so a huge upload can't exhaust memory.
 builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = 1 << 20);
 

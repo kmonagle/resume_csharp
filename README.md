@@ -225,6 +225,8 @@ keeps a broken push out of production.
 | Clicks never appear in `click_events` | The `OnCompleted` callback is failing (see the logs under `LinkApi.Clicks`). |
 | Clicks counted twice | Something else is also logging click events. |
 | CI can't check out the contract | The tag isn't pushed, the Next.js repo is private, or `CONTRACT_REPO` is wrong. |
+| Render's log tab shows only startup lines | Per-request lines come from the `Microsoft.AspNetCore.Hosting.Diagnostics` category, enabled in `appsettings.json`; if someone raises `Microsoft.AspNetCore` above that, they vanish. |
+| No error logged for "that code is taken" | Deliberate: EF logs every caught unique-violation as an Error with a stack trace, and a taken code is normal. Its `Update` and `Database.Command` log categories are switched off in `appsettings.json`; real failures are still logged by the exception handler. |
 | Want to see the SQL EF sends | Set `Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command=Information`. |
 
 ## Layout
