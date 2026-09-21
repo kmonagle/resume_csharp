@@ -1,13 +1,15 @@
 # resume_csharp — the link backend, in C# (ASP.NET Core)
 
-A fourth implementation of the short-link API. The Next.js app in
-[`resume_nextjs`](https://github.com/kmonagle/resume_nextjs) can serve links itself out of
-its own code, and the [Go](https://github.com/kmonagle/resume_go) and
-[Python](https://github.com/kmonagle/resume_python) services do the same job; this one does
-it in C#. All of them are held to the **identical contract test suite**, which is the point:
+One of four backends for the short-link API (Go, Python, C# and Java). The Next.js app in
+[`resume_nextjs`](https://github.com/kmonagle/resume_nextjs) is the UI/BFF and does not serve
+links itself; it calls one of these services. The [Go](https://github.com/kmonagle/resume_go),
+[Python](https://github.com/kmonagle/resume_python) and Java services do the same job; this one
+does it in C#. All of them are held to the **identical contract test suite**, which is the point:
 the contract, not the language, defines the system.
 
-**Implements contract `contract-v1`** (the tag pinned in `.github/workflows/ci.yml`).
+Start with the overview: [Start here](https://github.com/kmonagle/resume_nextjs#start-here).
+
+The contract is `docs/openapi.yaml` in `resume_nextjs`.
 
 A ten-point crib sheet of the biggest C#-versus-JS/TS differences is in the comment at the top of
 `src/LinkApi/Program.cs`.
@@ -38,9 +40,8 @@ developer would expect (`grep -rn "JS/TS vs C#" src tests`).
 - The **browser never talks to this service**. It only sees the Next.js domain, so there is no
   CORS or cross-site-cookie problem, and the bearer token and this service's URL never reach
   client JavaScript. Next.js is a **BFF** (backend-for-frontend).
-- Next.js picks its backend with an environment variable, `LINK_BACKEND`: **`local`** (its own
-  Drizzle code) or **`remote`** (call one of these services, at `LINK_BACKEND_URL`). Point it at
-  Go, Python or C# and the UI can't tell.
+- Next.js calls whichever backend `LINK_BACKEND_URL` points at. Point it at
+  Go, Python, C# or Java and the UI can't tell.
 - **All backends share one Postgres database**, so links carry across them.
 
 ### Who owns what
@@ -48,11 +49,11 @@ developer would expect (`grep -rn "JS/TS vs C#" src tests`).
 | Concern | Owner |
 |---|---|
 | UI, dashboard polling, forms, the visitor cookie | Next.js |
-| Input validation | **Both**: Next validates first (fast form errors); this service validates again because it must not trust its caller. Rules and messages match. |
-| Business rules (limits, retention, 404 vs 410), atomic click counting | **Every backend**, with the same behaviour |
-| Click event logging | Whoever serves the redirect (here). Next.js must not log too or clicks double count. |
+| Input validation | **Both**: Next validates first (zod, fast form errors); this service validates again because it must not trust its caller. Rules and messages match. |
+| Business rules (limits, retention, 404 vs 410), atomic click counting | **This backend** (every backend has the same behaviour) |
+| Click event logging | **This backend**, when it serves the redirect. |
 | **Database schema and migrations** | **The Next.js repo.** This service never migrates. |
-| The contract (OpenAPI spec + tests) | The Next.js repo, pinned by tag |
+| The contract (OpenAPI spec + tests) | The Next.js repo; CI here checks out its `main` |
 
 ### How each Next.js feature becomes calls to this service
 
@@ -196,7 +197,6 @@ so the two would wake together; that was removed because server-to-server reques
 
 - **Don't try to keep everything awake.** A free workspace gets about 750 instance-hours a month. One
   always-on service uses about 730; two would run out mid-month.
-- `LINK_BACKEND=local` needs no second service at all.
 
 On this side, `/meta` is the health check and doesn't touch the database, so the service reports
 healthy the moment Kestrel is listening. The **first real request is slower** than the rest (about a
@@ -243,10 +243,11 @@ which adds a second or two.
 ## The contract
 
 `docs/openapi.yaml` in the Next.js repo is the source of truth. `.github/workflows/ci.yml` here
-pins the version this service implements (`CONTRACT_REF: contract-v1`, a git tag); CI checks it
-out, applies its `drizzle/*.sql` to a throwaway Postgres, starts this service, and runs the shared
-suite against it. To upgrade, bump the tag, make the new tests pass, and merge; other backends can
-stay on the old tag meanwhile, so prefer *additive* contract changes.
+checks out that repo's `main` (`CONTRACT_REF: main`), applies its `drizzle/*.sql` to a throwaway
+Postgres, starts this service, and runs the shared suite against it. The suite also runs through
+Next.js in front of this backend (the Next.js CI `remote` matrix). A contract change turns this CI
+red until this backend is updated. The trade-off is that CI depends on the contract's current
+state, which is fine for one owner.
 
 **Where a framework default disagreed with the contract** (each one is a place the tests or the
 logs would have caught it, and each is fixed and commented in the code):
@@ -262,22 +263,23 @@ logs would have caught it, and each is fixed and commented in the code):
 | EF Core treats a property's CLR default as "unset" and uses the column default | an explicit `false` must be stored as `false` | no database default configured for `IsActive` |
 | EF Core logs every caught unique-violation as an Error with a stack trace | a taken code is normal, not an incident | the EF `Update`/`Database.Command` log categories are off |
 | The image's default port setting conflicts with `UseUrls` | listen on Render's `PORT` cleanly | set `HTTP_PORTS` from `PORT` instead |
+| System.Text.Json reads a JSON string as a number by default (`"maxClicks": "5"` is accepted) | a `400` for a wrong-typed field | `ConfigureHttpJsonOptions` with `NumberHandling = JsonNumberHandling.Strict` in `Program.cs` |
 | `Microsoft.AspNetCore` at `Warning` (the usual template) hides request logs | one log line per request | the `Hosting.Diagnostics` category is switched back on |
 
-### Four implementations, side by side
+### The backends, side by side
 
-| C# (this repo) | Python (`resume_python`) | Go (`resume_go`) | Next.js (`resume_nextjs`) | Job |
+| C# (this repo) | Python (`resume_python`) | Go (`resume_go`) | Java (`resume_java`) | Job |
 |---|---|---|---|---|
-| `Data/EfLinkStore.cs` | `app/store.py` | `internal/store` | `link-repository.ts` | the only code that runs queries |
-| `Data/LinksDbContext.cs` | `app/models.py` | (plain SQL) | `schema.ts` | the table definitions |
-| `Services/LinkService.cs` | `app/service.py` | `internal/service` | `link-api/local.ts` | limits, retention, codes, 404 vs 410 |
-| `Endpoints/` | `app/api.py` | `internal/api` | `src/app/api/**`, `src/app/r/**` | HTTP handlers, auth |
-| `Contracts/` | `app/schemas.py` | `internal/link/validate.go` | `link-schema.ts` | input validation, wire format |
-| `Domain/` | `app/domain.py` | `internal/link/link.go` | `link-status.ts` | "is this link usable?" |
-| `Configuration/` | `app/config.py`, `app/db.py` | `internal/config` | `env.ts`, `db/client.ts` | environment, connecting to Postgres |
+| `Data/EfLinkStore.cs` | `app/store.py` | `internal/store` | `persistence/` | the only code that runs queries |
+| `Data/LinksDbContext.cs` | `app/models.py` | (plain SQL) | `persistence/` (JPA entities) | the table definitions |
+| `Services/LinkService.cs` | `app/service.py` | `internal/service` | `service/LinkService` | limits, retention, codes, 404 vs 410 |
+| `Endpoints/` | `app/api.py` | `internal/api` | `web/LinkController`, `web/AuthInterceptor` | HTTP handlers, auth |
+| `Contracts/` | `app/schemas.py` | `internal/link/validate.go` | `web/CreateLinkValidator`, `LinkDto` | input validation, wire format |
+| `Domain/` | `app/domain.py` | `internal/link/link.go` | `domain/` | "is this link usable?" |
+| `Configuration/` | `app/config.py`, `app/db.py` | `internal/config` | `config/` | environment, connecting to Postgres |
 
 The trade-offs show up in the numbers: this image is ~380 MB (it carries the .NET runtime),
-against ~270 MB for Python and ~20 MB for Go's single static binary.
+against ~270 MB for Python, ~400 MB for Java and ~20 MB for Go's single static binary.
 
 ## Environment variables
 
@@ -286,7 +288,7 @@ against ~270 MB for Python and ~20 MB for Go's single static binary.
 | `DATABASE_URL` | this service | Postgres URL. Use Neon's **pooled** URL in production. |
 | `LINK_BACKEND_TOKEN` | this service **and** Next.js | Shared secret, 16+ characters. **Must be identical on both.** |
 | `PORT` | this service | Render sets it; defaults to `8080`. |
-| `LINK_BACKEND=remote`, `LINK_BACKEND_URL` | Next.js | Point Next.js at this service's public URL. |
+| `LINK_BACKEND_URL` | Next.js | Point Next.js at this service's public URL. |
 
 ## Run it locally
 
@@ -304,7 +306,7 @@ docker run --rm -p 8080:8080 \
 #    DATABASE_URL=... LINK_BACKEND_TOKEN=... dotnet run --project src/LinkApi
 
 # 3. Next.js in front of it (from ../resume_nextjs)
-LINK_BACKEND=remote LINK_BACKEND_URL=http://localhost:8080 \
+LINK_BACKEND_URL=http://localhost:8080 \
 LINK_BACKEND_TOKEN=local-dev-token-0123456789 npm run dev
 ```
 
@@ -324,7 +326,7 @@ CONTRACT_API_PREFIX="" CONTRACT_TOKEN=local-dev-token-0123456789 npm run test:co
 
 Create a **Web Service** from this repo, runtime **Docker**, and set `DATABASE_URL` (the Neon
 **pooled** URL) and `LINK_BACKEND_TOKEN`. Render provides `PORT`. Set the health check path to
-`/meta`. To use it, set `LINK_BACKEND=remote`, `LINK_BACKEND_URL` and the same
+`/meta`. To use it, set `LINK_BACKEND_URL` and the same
 `LINK_BACKEND_TOKEN` on the Next.js service. Setting **Auto-Deploy** to "After CI Checks Pass"
 keeps a broken push out of production.
 
@@ -338,7 +340,7 @@ keeps a broken push out of production.
 | `relation "links" does not exist` | The schema hasn't been applied; migrate the Next.js repo first. |
 | Clicks never appear in `click_events` | The `OnCompleted` callback is failing (see the logs under `LinkApi.Clicks`). |
 | Clicks counted twice | Something else is also logging click events. |
-| CI can't check out the contract | The tag isn't pushed, the Next.js repo is private, or `CONTRACT_REPO` is wrong. |
+| CI can't check out the contract | The Next.js repo is private, or `CONTRACT_REPO` is wrong. |
 | Render's log tab shows only startup lines | Per-request lines come from the `Microsoft.AspNetCore.Hosting.Diagnostics` category, enabled in `appsettings.json`; if someone raises `Microsoft.AspNetCore` above that, they vanish. |
 | No error logged for "that code is taken" | Deliberate: EF logs every caught unique-violation as an Error with a stack trace, and a taken code is normal. Its `Update` and `Database.Command` log categories are switched off in `appsettings.json`; real failures are still logged by the exception handler. |
 | Want to see the SQL EF sends | Set `Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command=Information`. |
@@ -407,5 +409,5 @@ Each of these is a choice with a reason, and the trade-off is stated so it can b
   while `SetProperty(l => l.UpdatedAt, l => DateTimeOffset.UtcNow)` becomes the database's `now()`
   (as in the other implementations). It also confirmed the claim's expiry check runs on the
   database clock.
-- **The contract is pinned and tested,** so "same behaviour in four languages" is checked on every
+- **The contract is tested in CI,** so "same behaviour in four languages" is checked on every
   push, not just claimed.

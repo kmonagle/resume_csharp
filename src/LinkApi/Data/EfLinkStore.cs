@@ -3,8 +3,8 @@
 // and audited against the shared schema, in one place. The schema is owned by the
 // Next.js repo's migrations; this service never migrates.
 //
-// JS/TS vs C#: this is the counterpart of link-repository.ts (Drizzle) in the Next.js
-// repo. Queries are written in LINQ: `db.Links.Where(l => l.OwnerId == owner)` looks
+// JS/TS vs C#: this is the only code that runs queries (Next.js holds no data). Compare
+// a typical Drizzle/Prisma data layer in a Node app. Queries are written in LINQ: `db.Links.Where(l => l.OwnerId == owner)` looks
 // like array methods, but the lambda is an EXPRESSION TREE, not a function: EF Core
 // reads its structure and translates it to SQL. That is why you can only use
 // translatable things inside it (a random C# method has no SQL equivalent).

@@ -127,6 +127,20 @@ public class ApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task A_number_sent_as_a_string_is_a_400()
+    {
+        var request = Request(HttpMethod.Post, "/links", Bearer, "owner-1");
+        request.Content = new StringContent(
+            "{\"targetUrl\":\"https://example.com\",\"maxClicks\":\"5\"}",
+            System.Text.Encoding.UTF8,
+            "application/json");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Meta_is_open_and_briefly_cacheable()
     {
         var response = await client.GetAsync("/meta");

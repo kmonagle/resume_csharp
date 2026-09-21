@@ -48,6 +48,7 @@ using LinkApi.Configuration;
 using LinkApi.Data;
 using LinkApi.Endpoints;
 using LinkApi.Services;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -79,6 +80,13 @@ builder.Services
         settings => settings.Problems().Count == 0,
         "Invalid configuration: DATABASE_URL is required and LINK_BACKEND_TOKEN must be at least 16 characters")
     .ValidateOnStart();
+
+// --- JSON ------------------------------------------------------------------------
+// JS/TS vs C#: System.Text.Json is lenient about types by default only where told to be;
+// we make numbers strict, so `"maxClicks": "5"` (a string) is a 400 like the contract
+// says, instead of being quietly read as 5.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.NumberHandling = JsonNumberHandling.Strict);
 
 // --- services (dependency injection) ------------------------------------------------
 // JS/TS vs C#: registering a service tells the container how to build it. Lifetimes:

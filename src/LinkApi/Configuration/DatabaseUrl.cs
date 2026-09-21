@@ -3,9 +3,8 @@
 // driver, wants a key=value connection string. This converts one to the other and
 // applies the settings that matter for a shared, PgBouncer-fronted database.
 //
-// JS/TS vs C#: this is the counterpart of src/server/db/client.ts in the Next.js
-// repo. The postgres.js driver accepts a URL directly; Npgsql does not, and it has
-// no built-in URL parsing, so we do it here.
+// JS/TS vs C#: Node's postgres.js driver accepts a URL directly; Npgsql does not, and it
+// has no built-in URL parsing, so we do it here.
 using System.Web;
 using Npgsql;
 

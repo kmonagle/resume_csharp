@@ -1,8 +1,8 @@
 // Why this file exists: the business rules, between HTTP (the endpoints) and SQL (the
 // store): demo size limits, retention cleanup, short-code generation with retry, and
-// how a redirect decides 404 vs 410. It is the C# counterpart of the Next.js app's
-// local adapter (src/server/link-api/local.ts) and of the Go and Python services, and
-// the contract tests hold all of them to the same behaviour.
+// how a redirect decides 404 vs 410. It is the C# counterpart of the Go, Python and Java
+// services' business-rule layer, and the contract tests hold all of them to the same
+// behaviour.
 using LinkApi.Contracts;
 using LinkApi.Domain;
 
